@@ -1,41 +1,41 @@
-#include "cuda_runtime.h"
 #include <stdio.h>
 #include <memory.h>
+#include <cuda_runtime.h>
+#include "waveformat/waveformat.h"
 
-#define N 33 * 1024
-#define threadsPerBlock 256
-#define blocksPerGrid (N + threadsPerBlock - 1) / threadsPerBlock
-#define RADIUS 2
+#define WINDOW_WIDTH 9
+#define THREADS_PER_BLOCK 1024
+
 // Signal/image element type
 typedef int element;
 //   1D MEDIAN FILTER implementation
 //     signal - input signal
 //     result - output signal
-//     N      - length of the signal
-
-
-__global__ void _medianfilter(const element* signal, element* result)
+//     length - length of the signal
+__global__ void _medianfilter(const element* signal, element* result, int length)
 {
-	__shared__ element cache[threadsPerBlock + 2 * RADIUS];
-	element window[5];
+	element window[WINDOW_WIDTH];
+    int radius = WINDOW_WIDTH / 2;
+	__shared__ element cache[THREADS_PER_BLOCK + 2 * (WINDOW_WIDTH / 2)];
+
 	int gindex = threadIdx.x + blockDim.x * blockIdx.x;
-	int lindex = threadIdx.x + RADIUS;
+	int lindex = threadIdx.x + radius;
 	// Reads input elements into shared memory
 	cache[lindex] = signal[gindex];
-	if (threadIdx.x < RADIUS)
+	if (threadIdx.x < radius)
 	{
-		cache[lindex - RADIUS] = signal[gindex - RADIUS];
-		cache[lindex + threadsPerBlock] = signal[gindex + threadsPerBlock];
+		cache[lindex - radius] = signal[gindex - radius];
+		cache[lindex + THREADS_PER_BLOCK] = signal[gindex + THREADS_PER_BLOCK];
 	}
 	__syncthreads();
-	for (int j = 0; j < 2 * RADIUS + 1; ++j)
+	for (int j = 0; j < 2 * radius + 1; ++j)
 		window[j] = cache[threadIdx.x + j];
 	// Orders elements (only half of them)
-	for (int j = 0; j < RADIUS + 1; ++j)
+	for (int j = 0; j < radius + 1; ++j)
 	{
 		// Finds position of minimum element
 		int min = j;
-		for (int k = j + 1; k < 2 * RADIUS + 1; ++k)
+		for (int k = j + 1; k < 2 * radius + 1; ++k)
 			if (window[k] < window[min])
 				min = k;
 		// Puts found minimum element in its place
@@ -44,50 +44,55 @@ __global__ void _medianfilter(const element* signal, element* result)
 		window[min] = temp;
 	}
 	// Gets result - the middle element
-	result[gindex] = window[RADIUS];
+	result[gindex] = window[radius];
 }
 
 //   1D MEDIAN FILTER wrapper
 //     signal - input signal
 //     result - output signal
-//     N      - length of the signal
-void medianfilter(element* signal, element* result)
+//     length - length of the signal
+void medianfilter(element* signal, element* result, int length)
 {
 	element *dev_extension, *dev_result;
+    int radius = WINDOW_WIDTH / 2;
 
 	//   Check arguments
-	if (!signal || N < 1)
+	if (!signal || length < 1)
 		return;
-	//   Treat special case N = 1
-	if (N == 1)
+	//   Treat special case length = 1
+	if (length == 1)
 	{
 		if (result)
 			result[0] = signal[0];
 		return;
 	}
 	//   Allocate memory for signal extension
-	element* extension = (element*)malloc((N + 2 * RADIUS) * sizeof(element));
+	element* extension = (element*)malloc((length + 2 * radius) * sizeof(element));
 	//   Check memory allocation
 	if (!extension)
 		return;
 	//   Create signal extension
-	cudaMemcpy(extension + 2, signal, N * sizeof(element), cudaMemcpyHostToHost);
-	for (int i = 0; i < RADIUS; ++i)
+	cudaMemcpy(extension + 2, signal, length * sizeof(element), cudaMemcpyHostToHost);
+	for (int i = 0; i < radius; ++i)
 	{
 		extension[i] = signal[1 - i];
-		extension[N + RADIUS + i] = signal[N - 1 - i];
+		extension[length + radius + i] = signal[length - 1 - i];
 	}
 
-	cudaMalloc((void**)&dev_extension, (N + 2 * RADIUS) * sizeof(int));
-	cudaMalloc((void**)&dev_result, N * sizeof(int));
+	cudaMalloc((void**)&dev_extension, (length + 2 * radius) * sizeof(int));
+	cudaMalloc((void**)&dev_result, length * sizeof(int));
 
 	// Copies signal to device
-	cudaMemcpy(dev_extension, extension, (N + 2 * RADIUS) * sizeof(element), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_extension, extension, (length + 2 * radius) * sizeof(element), cudaMemcpyHostToDevice);
+
+    // Set up execution configuration
+    dim3 block(THREADS_PER_BLOCK, 1);
+    dim3 grid((length + block.x - 1) / block.x, 1);
+
 	//   Call median filter implementation
-	for (int i = 0; i < 10; ++i)
-		_medianfilter<<<blocksPerGrid, threadsPerBlock>>>(dev_extension + RADIUS, dev_result);
+	_medianfilter<<<grid, block>>>(dev_extension + radius, dev_result, length);
 	// Copies result to host
-	cudaMemcpy(result, dev_result, N * sizeof(element), cudaMemcpyDeviceToHost);
+	cudaMemcpy(result, dev_result, length * sizeof(element), cudaMemcpyDeviceToHost);
 
 	// Free memory
 	free(extension);
@@ -95,35 +100,76 @@ void medianfilter(element* signal, element* result)
 	cudaFree(dev_result);
 }
 
-int main()
+int main(int argc, char **argv)
 {
-	int *Signal, *result;
+	element *signal, *result;
+    
+    if (argc != 2)
+    {
+        printf("Please specify name of file!\n");
+        exit(EXIT_FAILURE);
+    }
+
 	float elapsedTime;
 	cudaEvent_t start, stop;
 	cudaEventCreate(&start);
 	cudaEventCreate(&stop);
+
+    // read input music file
 	FILE *fp;
-	
-	Signal = (int *)malloc(N * sizeof(int));
-	result = (element *)malloc(N * sizeof(element));
-	
-	for (int i = 0; i < N; i++)
-	{
-		Signal[i] = i % 5 + 1;
-	}
+    fp = fopen(argv[1], "rb");
+    if (!fp)
+    {
+        printf("open input file failed!\n");
+        return -1;
+    }
+    // get info of file
+    waveFormat fmt = readWaveHeader(fp);
+    int size = fmt.data_size;
+    
+    // allocate host memory for input and output data
+    signal = (element *)malloc(size * sizeof(element));
+    // get data of input file
+    fseek(fp, 44L, SEEK_SET);
+    fread(signal, sizeof(short), size, fp);
+    // close file stream
+    if (fp)
+    {
+        fclose(fp);
+        fp = NULL;
+    }
+
+    // allocate host memory for output data
+	result = (element *)malloc(size * sizeof(element));
+
+    // execute median filter and time it
 	cudaEventRecord(start, 0);
-	medianfilter(Signal, result);
+	medianfilter(signal, result, size);
 	cudaEventRecord(stop, 0);
 	cudaEventSynchronize(stop);
 	cudaEventElapsedTime(&elapsedTime, start, stop);
 	printf("%.3lf ms\n", elapsedTime);
 
-	fp = fopen("result.txt", "w");
-	if (fp == NULL)
-		printf("OPEN FILE FAILS!\n");
-	for (int i = 0; i < N; i ++)
-		fprintf(fp, "%d ", result[i]);
+    // save output data
+	fp = fopen("audios/gpu_v2_rst.wav", "wb+");
 
-	fclose(fp);
+	if (fp == NULL)
+        printf("Open output file failed!\n");
+
+    writeWaveHeader(fmt, fp);
+    fseek(fp, 44L, SEEK_SET);
+    fwrite(result, sizeof(short), size, fp);
+    
+    // close file stream
+    if (fp)
+    {
+	    fclose(fp);
+        fp = NULL;
+    }
+
+    // free host memory
+    free(signal);
+    free(result);
+
 	return 0;
 }
