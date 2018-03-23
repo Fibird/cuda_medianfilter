@@ -1,3 +1,6 @@
+/*
+ * This code is from CSDN--xiaobingqin, https://download.csdn.net/download/xiaobingqin/6646135
+ */
 #ifndef	_WAVE_FORMAT
 #define	_WAVE_FORMAT
 

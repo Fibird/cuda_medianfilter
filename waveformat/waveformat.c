@@ -1,3 +1,6 @@
+/*
+ * This code is from CSDN--xiaobingqin, https://download.csdn.net/download/xiaobingqin/6646135
+ */
 /*------Handling simple (i.e. PCM format only) wav format audio file-----*/
 #include "string.h"
 #include "stdio.h"
