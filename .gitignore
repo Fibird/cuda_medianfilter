@@ -1,6 +1,7 @@
 ### temp file ###
 *swp
 *~
+*.out
 
 ### executable file ###
 bin/
