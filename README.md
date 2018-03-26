@@ -2,10 +2,24 @@
 
 Using cuda C to implement medianfilter.
 
-# Compile
+# Build
+
+## GPU
 
 ```
-nvcc -arch=sm_xx gpu_medianfilter_1D_v1.cu waveformat/waveformat.c -o bin/gpu_vx
+nvcc -arch=sm_xx gpu_medianfilter_1D_vx.cu waveformat/waveformat.c -o bin/gpu_vx
 ```
 
-Note:sm_xx can be sm_30, sm_35 or sm_60 .... 
+## CPU
+
+```
+gcc cpu_medianfilter_1D.c -o bin/cpu_exe
+```
+
+# Run
+
+```
+./bin/gpu_vx audios/moz_noisy.wav
+```
+
+
