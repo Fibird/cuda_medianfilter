@@ -120,14 +120,15 @@ int main(int argc, char **argv)
         printf("open input file failed!\n");
         return -1;
     }
-    // get info of file
+    // get header info of input file
     waveFormat fmt = readWaveHeader(fp);
     int size = fmt.data_size;
     
     // allocate host memory for input and output data
     signal = (element *)malloc(size * sizeof(element));
-    // get data of input file
+    // move fp to the beginning position of data
     fseek(fp, 44L, SEEK_SET);
+    // read signal data from input file
     fread(signal, sizeof(short), size, fp);
     // close file stream
     if (fp)
@@ -151,9 +152,11 @@ int main(int argc, char **argv)
 
 	if (fp == NULL)
         printf("Open output file failed!\n");
-
+    // write header info into output file
     writeWaveHeader(fmt, fp);
+    // move fp to the beginning position of data
     fseek(fp, 44L, SEEK_SET);
+    // write result data into output file
     fwrite(result, sizeof(short), size, fp);
     
     // close file stream
