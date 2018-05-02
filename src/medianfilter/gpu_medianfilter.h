@@ -22,6 +22,20 @@
 #ifndef GPU_MEDIANFILTER_H
 #define GPU_MEDIANFILTER_H
 
+#include <opencv2/core/core.hpp>
+
+#define CHECK(call)                                                            \
+{                                                                              \
+    const cudaError_t error = call;                                            \
+    if (error != cudaSuccess)                                                  \
+    {                                                                          \
+        fprintf(stderr, "Error: %s:%d, ", __FILE__, __LINE__);                 \
+        fprintf(stderr, "code: %d, reason: %s\n", error,                       \
+                cudaGetErrorString(error));                                    \
+        exit(1);                                                               \
+    }                                                                          \
+}
+
 // Signal/image element type
 typedef float element;
 
@@ -39,6 +53,6 @@ void medianfilter1D(element* signal, element* result, unsigned length, int w_wid
 //     length - length of the signal
 //     k_width - width of kernel 
 //     ts_per_bk - threads per dimension of block
-void medianfilter2D(element *signal, element *result, unsigned width, unsigned height, int k_width, int ts_per_dm);
-
+void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm);
+void test_test();
 #endif

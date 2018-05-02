@@ -1,6 +1,5 @@
 #include <memory.h>
 #include <cuda_runtime.h>
-#include <opencv2/core/core.hpp>
 #include "gpu_medianfilter.h"
 
 __global__ void _medianfilter1D(const element* signal, element* result, unsigned length, int w_width, int ts_per_bk)
@@ -98,7 +97,7 @@ __global__ void _medianfilter2D(const element* signal, element* result, unsigned
     extern __shared__ element cache[];
     int sh_cols = ts_per_dm + radius * 2;
     int sh_rows = ts_per_dm + radius * 2;
-    //int bk_cols = ts_per_dm;    int bk_rows = ts_per_dm;
+    int bk_cols = ts_per_dm;    int bk_rows = ts_per_dm;
     unsigned sg_cols = width + radius * 2;
     unsigned sg_rows = height + radius * 2;
 
@@ -108,36 +107,35 @@ __global__ void _medianfilter2D(const element* signal, element* result, unsigned
     int ll_iy = threadIdx.y + radius;
 
 	// Reads input elements into shared memory
-	cache[ll_iy * sh_cols + ll_ix] = signal[gl_iy * sg_cols + gl_ix];
+	cache[ll_iy * sh_cols + ll_ix] = signal[(gl_iy + radius) * sg_cols + gl_ix + radius];
 	if (threadIdx.x < radius)
 	{
-        for (int i = 0; i < radius; i++)
-        {
-            cache[ll_iy * sh_cols + ll_ix - radius + i] = signal[gl_iy * sg_cols + gl_ix + radius - 1 - i];
-            cache[ll_iy * sh_cols + sh_cols + ll_ix - i - 1] = signal[gl_iy * sg_cols + sg_cols + gl_ix - radius + i];
-        }
+        cache[ll_iy * sh_cols + ll_ix - radius] = signal[(gl_iy + radius) * sg_cols + gl_ix];
+        cache[ll_iy * sh_cols + ll_ix + bk_cols] = signal[(gl_iy + radius) * sg_cols + gl_ix + bk_cols];
 	}
 	if (threadIdx.y < radius)
 	{
-        for (int i = 0; i < radius; i++)
-        {
-            cache[ll_ix * sh_rows + ll_iy - radius + i] = signal[gl_ix * sg_rows + gl_iy + radius - 1 - i];
-            cache[ll_ix * sh_rows + sh_rows + ll_iy - i - 1] = signal[gl_ix * sg_rows + sg_rows + gl_iy - radius + i];
-        }
+        cache[ll_ix * sh_rows + ll_iy - radius] = signal[(gl_ix + radius) * sg_rows + gl_iy];
+        cache[ll_ix * sh_rows + ll_iy + bk_rows] = signal[(gl_ix + radius) * sg_rows + gl_iy + bk_rows];
 	}
+    if (threadIdx.x < radius && threadIdx.y < radius)
+    {
+        cache[(ll_iy - radius) * sh_cols + ll_ix - radius] = signal[gl_iy * sg_cols + gl_ix];
+        cache[(ll_iy - radius) * sh_cols + ll_ix + bk_cols + radius] = signal[gl_iy * sg_cols + gl_ix + bk_cols + radius];
+    }
 	__syncthreads();
 
     // Get kernel element 
     for (int i = 0; i < k_width; ++i)
-	    for (int j = 0; j < k_width * k_width; ++j)
-	    	kernel[j] = cache[(threadIdx.y + i) * k_width + threadIdx.x + j];
+	    for (int j = 0; j < k_width; ++j)
+	    	kernel[j] = cache[(ll_ix - radius + i) * sh_cols + ll_iy - radius + j];
 
 	// Orders elements (only half of them)
 	for (int j = 0; j < k_width * k_width / 2 + 1; ++j)
 	{
 		// Finds position of minimum element
 		int min = j;
-		for (int k = j + 1; k < 2 * radius + 1; ++k)
+		for (int k = j + 1; k < k_width * k_width; ++k)
 			if (kernel[k] < kernel[min])
 				min = k;
 		// Puts found minimum element in its place
@@ -146,7 +144,7 @@ __global__ void _medianfilter2D(const element* signal, element* result, unsigned
 		kernel[min] = temp;
 	}
 	// Gets result - the middle element
-	result[gl_iy * sg_cols + gl_ix] = kernel[k_width * k_width / 2];
+	result[gl_iy * width + gl_ix] = kernel[k_width * k_width / 2];
     free(kernel);
 }
 
@@ -173,8 +171,9 @@ void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm
     int radius = k_width / 2;
 
 	/////   Allocate page-locked memory for image extension 
-	cudaMallocHost((void**)&extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element));
-    cudaMallocHost((void**)&result, width * height * sizeof(element));
+	CHECK(cudaMallocHost((void**)&extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element)));
+    //CHECK(cudaMallocHost((void**)&result, width * height * sizeof(element)));
+    result = (element*)malloc(width * height * sizeof(element));
 	//   Check memory allocation
 	if (!extension)
 		return;
@@ -182,7 +181,8 @@ void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm
 	/////   Create image extension
     // Inner elements
     for (unsigned i = 0; i < height; ++i)
-        cudaMemcpy(extension + (width + radius + radius) * (i + radius) +  radius, src.data + width * i, width * sizeof(element), cudaMemcpyHostToHost);
+        cudaMemcpy(extension + (width + radius + radius) * (i + radius) +  radius, (element*)src.data + width * i, width * sizeof(element), cudaMemcpyHostToHost);
+        
     // marginal elements
     for (int i = 0; i < radius; ++i)
     {
@@ -199,27 +199,25 @@ void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm
 	}
 
     // Allocate device memory
-	cudaMalloc((void**)&dev_extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element));
-	cudaMalloc((void**)&dev_result, width * height * sizeof(element));
+	CHECK(cudaMalloc((void**)&dev_extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element)));
+	CHECK(cudaMalloc((void**)&dev_result, width * height * sizeof(element)));
 
 	// Copies extension to device
-	cudaMemcpy(dev_extension, extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element), cudaMemcpyHostToDevice);
+	CHECK(cudaMemcpy(dev_extension, extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element), cudaMemcpyHostToDevice));
 
     // Set up execution configuration
     dim3 block(ts_per_dm, ts_per_dm);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
-    unsigned shared_size = (ts_per_dm + 2 * radius) * (ts_per_dm + 2 * radius);
+    unsigned shared_size = (ts_per_dm + 2 * radius) * (ts_per_dm + 2 * radius) * sizeof(element);
 
 	//   Call median filter implementation
-	_medianfilter2D<<<grid, block, shared_size>>>(dev_extension + radius, dev_result, width, height, k_width, ts_per_dm);
+	_medianfilter2D<<<grid, block, shared_size>>>(dev_extension, dev_result, width, height, k_width, ts_per_dm);
+    cudaDeviceSynchronize();
 	// Copies result to host
-	cudaMemcpy(result, dev_result, width * height * sizeof(element), cudaMemcpyDeviceToHost);
-
-    element *dstData = (element*)malloc(width * height * sizeof(element));
-    cudaMemcpy(dstData, result, width * height * sizeof(element), cudaMemcpyHostToHost);
+	CHECK(cudaMemcpy(result, dev_result, width * height * sizeof(element), cudaMemcpyDeviceToHost));
 
     // Create dst image
-    dst = cv::Mat(height, width, src.type(), dstData);
+    dst = cv::Mat(height, width, src.type(), result);
 
 	// Free memory
 	cudaFreeHost(extension);
