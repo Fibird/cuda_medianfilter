@@ -11,11 +11,11 @@ __global__ void _medianfilter1D(const element* signal, element* result, unsigned
 	int gindex = threadIdx.x + blockDim.x * blockIdx.x;
 	int lindex = threadIdx.x + radius;
 	// Reads input elements into shared memory
-	cache[lindex] = signal[gindex];
+	cache[lindex] = signal[gindex + radius];
 	if (threadIdx.x < radius)
 	{
-		cache[lindex - radius] = signal[gindex - radius];
-		cache[lindex + ts_per_bk] = signal[gindex + ts_per_bk];
+		cache[lindex - radius] = signal[gindex];
+		cache[lindex + ts_per_bk] = signal[gindex + radius + ts_per_bk];
 	}
 	__syncthreads();
 	for (int j = 0; j < 2 * radius + 1; ++j)
@@ -108,27 +108,30 @@ __global__ void _medianfilter2D(const element* signal, element* result, unsigned
 
 	// Reads input elements into shared memory
 	cache[ll_iy * sh_cols + ll_ix] = signal[(gl_iy + radius) * sg_cols + gl_ix + radius];
+    // Marginal elements in cache
 	if (threadIdx.x < radius)
 	{
         cache[ll_iy * sh_cols + ll_ix - radius] = signal[(gl_iy + radius) * sg_cols + gl_ix];
-        cache[ll_iy * sh_cols + ll_ix + bk_cols] = signal[(gl_iy + radius) * sg_cols + gl_ix + bk_cols];
+        cache[ll_iy * sh_cols + ll_ix + bk_cols] = signal[(gl_iy + radius) * sg_cols + gl_ix + radius + bk_cols];
 	}
 	if (threadIdx.y < radius)
 	{
-        cache[ll_ix * sh_rows + ll_iy - radius] = signal[(gl_ix + radius) * sg_rows + gl_iy];
-        cache[ll_ix * sh_rows + ll_iy + bk_rows] = signal[(gl_ix + radius) * sg_rows + gl_iy + bk_rows];
+        cache[(ll_iy - radius) * sh_cols + ll_ix] = signal[gl_iy * sg_cols + gl_ix + radius];
+        cache[(ll_iy + bk_rows) * sh_cols + ll_ix] = signal[(gl_iy + radius + bk_rows) * sg_cols + gl_ix + radius];
 	}
     if (threadIdx.x < radius && threadIdx.y < radius)
     {
         cache[(ll_iy - radius) * sh_cols + ll_ix - radius] = signal[gl_iy * sg_cols + gl_ix];
-        cache[(ll_iy - radius) * sh_cols + ll_ix + bk_cols + radius] = signal[gl_iy * sg_cols + gl_ix + bk_cols + radius];
+        cache[(ll_iy - radius) * sh_cols + ll_ix + bk_cols] = signal[gl_iy * sg_cols + gl_ix + radius + bk_cols];
+        cache[(ll_iy + bk_rows) * sh_cols + ll_ix + bk_cols] = signal[(gl_iy + radius + bk_rows) * sg_cols + gl_ix + radius + bk_cols];
+        cache[(ll_iy + bk_rows) * sh_cols + ll_ix - radius] = signal[(gl_iy + radius + bk_rows) * sg_cols + gl_ix];
     }
 	__syncthreads();
 
     // Get kernel element 
     for (int i = 0; i < k_width; ++i)
 	    for (int j = 0; j < k_width; ++j)
-	    	kernel[j] = cache[(ll_ix - radius + i) * sh_cols + ll_iy - radius + j];
+	    	kernel[i * k_width + j] = cache[(ll_iy - radius + i) * sh_cols + ll_ix - radius + j];
 
 	// Orders elements (only half of them)
 	for (int j = 0; j < k_width * k_width / 2 + 1; ++j)
@@ -172,11 +175,7 @@ void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm
 
 	/////   Allocate page-locked memory for image extension 
 	CHECK(cudaMallocHost((void**)&extension, (width + 2 * radius) * (height + 2 * radius) * sizeof(element)));
-    //CHECK(cudaMallocHost((void**)&result, width * height * sizeof(element)));
-    result = (element*)malloc(width * height * sizeof(element));
-	//   Check memory allocation
-	if (!extension)
-		return;
+    CHECK(cudaMallocHost((void**)&result, width * height * sizeof(element)));
 
 	/////   Create image extension
     // Inner elements

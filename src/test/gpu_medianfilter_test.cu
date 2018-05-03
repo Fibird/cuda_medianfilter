@@ -31,7 +31,7 @@ int main(int argc, char **argv)
 	cudaEventElapsedTime(&elapsedTime, start, stop);
 	printf("%.3lf ms\n", elapsedTime);
     result.convertTo(result, CV_8UC1);
-    imwrite("result.jpg", result);
+    imwrite("result/restor.jpg", result);
 	return 0;
 }
 

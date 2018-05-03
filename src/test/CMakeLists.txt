@@ -19,7 +19,7 @@ ${CPU_MEDIANFILTER_INCLUDE_DIRS}
 ${GPU_MEDIANFILTER_INCLUDE_DIRS}
 )
 
-#set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_61,code=sm_61)
+set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS};-gencode arch=compute_60,code=sm_60)
 add_executable(cpu_medianfilter_test cpu_medianfilter_test.c)
 
 cuda_add_executable(gpu_medianfilter_test gpu_medianfilter_test.cu)

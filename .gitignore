@@ -40,5 +40,6 @@ build
 *.cubin
 *.fatbin
 
-
+### result ###
+result
 # End of https://www.gitignore.io/api/cuda
