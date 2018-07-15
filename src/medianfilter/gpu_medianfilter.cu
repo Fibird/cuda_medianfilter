@@ -91,7 +91,8 @@ void medianfilter1D(element* signal, element* result, unsigned length, int w_wid
 
 __global__ void _medianfilter2D(const element* signal, element* result, unsigned width, unsigned height, int k_width, int ts_per_dm)
 {
-	element *kernel = (element*)malloc(sizeof(element) * k_width * k_width);
+	//element *kernel = (element*)malloc(sizeof(element) * k_width * k_width);
+    element kernel[9];
     int radius = k_width / 2;
     // use dynamic size shared memory
     extern __shared__ element cache[];
@@ -105,7 +106,9 @@ __global__ void _medianfilter2D(const element* signal, element* result, unsigned
 	int gl_iy = threadIdx.y + blockDim.y * blockIdx.y;
     int ll_ix = threadIdx.x + radius;
     int ll_iy = threadIdx.y + radius;
-
+    
+    if (gl_ix < width && gl_iy < height)
+    {
 	// Reads input elements into shared memory
 	cache[ll_iy * sh_cols + ll_ix] = signal[(gl_iy + radius) * sg_cols + gl_ix + radius];
     // Marginal elements in cache
@@ -148,7 +151,8 @@ __global__ void _medianfilter2D(const element* signal, element* result, unsigned
 	}
 	// Gets result - the middle element
 	result[gl_iy * width + gl_ix] = kernel[k_width * k_width / 2];
-    free(kernel);
+    }
+    //free(kernel);
 }
 
 void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm)

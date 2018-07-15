@@ -37,6 +37,7 @@
 }
 
 // Signal/image element type
+// Must be float or double
 typedef float element;
 
 //   1D MEDIAN FILTER wrapper
@@ -54,5 +55,4 @@ void medianfilter1D(element* signal, element* result, unsigned length, int w_wid
 //     k_width - width of kernel 
 //     ts_per_bk - threads per dimension of block
 void medianfilter2D(const cv::Mat &src, cv::Mat &dst, int k_width, int ts_per_dm);
-void test_test();
 #endif
